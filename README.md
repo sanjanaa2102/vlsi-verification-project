@@ -20,10 +20,11 @@ Early stage. Currently contains:
 
 `phase1_uart/` now has a properly separated verification architecture
 (`uart_env/`: driver, monitor, Python reference model, scoreboard,
-protocol checker, constrained-random stimulus, functional coverage) --
-see `phase1_uart/VERIFICATION_PLAN.md` for the feature/test/check/coverage
-traceability. Formal checks, UART RX, a second (protocol) DUT, and CI are
-planned for later phases.
+protocol checker, constrained-random stimulus, functional coverage) and a
+generalized, DUT-agnostic mutation-testing framework (`mutation/`) -- see
+`phase1_uart/VERIFICATION_PLAN.md` for the feature/test/check/coverage
+traceability and the mutation analysis. Formal checks, UART RX, a second
+(protocol) DUT, and CI are planned for later phases.
 
 ## Requirements
 
@@ -106,6 +107,30 @@ make MODULE=test_uart_tx_checker_only # protocol checker in isolation
 cat sim_build/coverage.yml            # Phase 2 coverage report
 cat sim_build/coverage_random.yml     # Phase 3 coverage report
 
-python run_mutants.py           # mutation score: scoreboard-based test_uart_tx.py
-python run_mutants_checker.py   # mutation score: protocol checker alone
+python run_mutants.py           # mutation score: scoreboard-based test_uart_tx.py (unchanged since Phase 3)
+python run_mutants_checker.py   # mutation score: protocol checker alone (unchanged since Phase 3)
 ```
+
+## Mutation testing framework
+
+`mutation/` is a small, DUT-agnostic engine (no UART-specific code): given
+a DUT directory and a manifest of `Mutant`/`Mechanism` objects, it runs
+each mutant against each mechanism, attributes CAUGHT/SURVIVED per
+mechanism, and reports total/caught/surviving/score plus a
+defect-category breakdown. `phase1_uart/mutation_suite.py` is the UART
+manifest (9 mutants across 8 realistic defect categories, run against 3
+mechanisms: scoreboard, protocol checker, and the broadened directed
+coverage sweep). A future DUT (e.g. a planned APB-Lite environment) reuses
+`mutation/` by writing its own manifest, not by duplicating a runner.
+
+```bash
+cd phase1_uart
+python mutation_suite.py   # full report + sim_build/mutation_report.json
+```
+
+Current result: **9/9 mutants caught (100% combined mutation score)**,
+reached by investigating (not force-fixing) two mutants that initially
+survived -- one revealed a real unbounded-loop bug in the driver (fixed),
+the other a genuine untested corner case (`tx_data` changing mid-frame,
+fixed with one new targeted test). Full investigation writeup in
+`phase1_uart/VERIFICATION_PLAN.md`.

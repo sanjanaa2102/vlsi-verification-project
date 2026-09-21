@@ -74,5 +74,20 @@ class UartTxDriver:
         # is sampled, not on the same cycle send_byte() issues it. Wait for
         # it here so callers can safely call wait_idle() immediately after
         # send_byte() returns without racing past a still-idle-looking bus.
+        #
+        # Bounded for the same reason as wait_idle(): found by mutation
+        # testing (mutant7_incomplete_reset) that a DUT whose FSM can drift
+        # away from IDLE without going through it again (e.g. a broken
+        # reset) will never legitimately re-raise tx_busy in response to a
+        # new tx_start, since only the IDLE state's case branch checks
+        # tx_start at all -- an unbounded wait here hung the whole
+        # regression instead of failing the test.
+        cycles = 0
         while int(self.dut.tx_busy.value) == 0:
             await ClockCycles(self.dut.clk, 1)
+            cycles += 1
+            if cycles > 200:
+                raise AssertionError(
+                    "tx_busy did not rise within 200 cycles of a start pulse "
+                    "-- DUT may not be responding to tx_start"
+                )

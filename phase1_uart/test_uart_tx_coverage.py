@@ -88,6 +88,41 @@ async def test_uart_tx_reset_mid_frame(dut):
 
 
 @cocotb.test()
+async def test_uart_tx_data_latched(dut):
+    """Feature: tx_data is captured into an internal register once, at the
+    start of a frame, and the transmitted bits are unaffected by tx_data
+    changing afterward. Check: send a byte, then change tx_data to a
+    different "decoy" value partway through the frame (after the data
+    bits would already have been latched); the scoreboard still expects
+    the original byte, so this fails if the DUT reads tx_data live
+    instead of a captured register.
+
+    Added in Phase 4: mutation testing (uart_tx_mutant8_unlatched_data)
+    found this was a real, structurally unverified gap -- no other test
+    in this suite ever changes tx_data during an active frame, so a DUT
+    that used tx_data directly instead of a latched register would have
+    passed every other test in this project undetected. See
+    VERIFICATION_PLAN.md."""
+    driver, scoreboard, monitor, checker = await setup(dut)
+
+    original, decoy = 0x3A, 0xC5
+    scoreboard.expect(original)
+    await driver.send_byte(original)
+
+    # Give the frame time to get underway (well past the start bit) before
+    # swapping tx_data -- a correctly-implemented DUT must not notice.
+    await ClockCycles(dut.clk, driver.clks_per_bit * 2)
+    dut.tx_data.value = decoy
+
+    checked = await finish(driver, scoreboard, monitor, checker)
+    assert checked == 1, f"expected 1 transaction checked, got {checked}"
+    print(
+        f"PASSED: transmitted byte unaffected by tx_data changing mid-frame "
+        f"(still {original:#04x}, not decoy {decoy:#04x})"
+    )
+
+
+@cocotb.test()
 async def test_uart_tx_coverage_report(dut):
     """Not a functional check -- cocotb runs @cocotb.test() functions in
     the order they are defined in the file, so this runs last within this
