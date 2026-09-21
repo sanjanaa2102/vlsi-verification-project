@@ -18,10 +18,12 @@ Early stage. Currently contains:
   scored with the same mutation suite for comparison against the
   hand-written testbench.
 
-This project is under active development. See commit history for progress;
-this README will be expanded as verification infrastructure (coverage,
-constrained-random stimulus, assertions, a scoreboard/reference-model
-architecture, formal checks, and CI) is added.
+`phase1_uart/` now has a properly separated verification architecture
+(`uart_env/`: driver, monitor, Python reference model, scoreboard,
+functional coverage) -- see `phase1_uart/VERIFICATION_PLAN.md` for the
+feature/test/check/coverage traceability. Constrained-random stimulus,
+SVA-equivalent protocol assertions, formal checks, UART RX, a second
+(protocol) DUT, and CI are planned for later phases.
 
 ## Requirements
 
@@ -76,3 +78,20 @@ verible-verilog-lint uart_tx.v
 Lint findings are currently reported, not auto-fixed — see the project's
 progress notes / commit history for current known findings and the plan to
 address them.
+
+## Verification architecture and functional coverage
+
+`phase1_uart/uart_env/` separates the testbench into a driver (stimulus
+only), a monitor (passively samples DUT outputs and decodes frames without
+knowing what was sent), a Python reference model, and a scoreboard (the
+only place a pass/fail comparison happens). Functional coverage is
+collected with [cocotb-coverage](https://github.com/mciepluc/cocotb-coverage)
+(included in `requirements.txt`). Full traceability from feature to test
+to check to coverage bin is in `phase1_uart/VERIFICATION_PLAN.md`.
+
+```bash
+cd phase1_uart
+make                          # existing directed regression (test_uart_tx.py)
+make MODULE=test_uart_tx_coverage   # Phase 2 coverage regression
+cat sim_build/coverage.yml    # exported coverage report
+```
