@@ -20,10 +20,10 @@ Early stage. Currently contains:
 
 `phase1_uart/` now has a properly separated verification architecture
 (`uart_env/`: driver, monitor, Python reference model, scoreboard,
-functional coverage) -- see `phase1_uart/VERIFICATION_PLAN.md` for the
-feature/test/check/coverage traceability. Constrained-random stimulus,
-SVA-equivalent protocol assertions, formal checks, UART RX, a second
-(protocol) DUT, and CI are planned for later phases.
+protocol checker, constrained-random stimulus, functional coverage) --
+see `phase1_uart/VERIFICATION_PLAN.md` for the feature/test/check/coverage
+traceability. Formal checks, UART RX, a second (protocol) DUT, and CI are
+planned for later phases.
 
 ## Requirements
 
@@ -79,19 +79,33 @@ Lint findings are currently reported, not auto-fixed — see the project's
 progress notes / commit history for current known findings and the plan to
 address them.
 
-## Verification architecture and functional coverage
+## Verification architecture, constrained-random, protocol checking, and coverage
 
 `phase1_uart/uart_env/` separates the testbench into a driver (stimulus
-only), a monitor (passively samples DUT outputs and decodes frames without
-knowing what was sent), a Python reference model, and a scoreboard (the
-only place a pass/fail comparison happens). Functional coverage is
-collected with [cocotb-coverage](https://github.com/mciepluc/cocotb-coverage)
-(included in `requirements.txt`). Full traceability from feature to test
-to check to coverage bin is in `phase1_uart/VERIFICATION_PLAN.md`.
+only), a monitor (passively decodes DUT outputs without knowing what was
+sent), a Python reference model, a scoreboard (data-value comparison —
+the only place pass/fail against an expected byte happens), a **protocol
+checker** (framing/timing invariants, independent of the scoreboard —
+never told what byte was sent; see `uart_env/checker.py` for why this is
+a cocotb checker rather than SVA, verified against this toolchain's actual
+capabilities), and a constrained-random stimulus generator
+(`uart_env/sequences.py`, built on cocotb's own seeded/logged `random`
+module for reproducibility). Functional coverage is collected with
+[cocotb-coverage](https://github.com/mciepluc/cocotb-coverage) (included
+in `requirements.txt`). Full traceability, and the measured breakdown of
+which mutants the scoreboard vs. the checker each independently catch, is
+in `phase1_uart/VERIFICATION_PLAN.md`.
 
 ```bash
 cd phase1_uart
-make                          # existing directed regression (test_uart_tx.py)
-make MODULE=test_uart_tx_coverage   # Phase 2 coverage regression
-cat sim_build/coverage.yml    # exported coverage report
+make                                  # existing directed regression (test_uart_tx.py)
+make MODULE=test_uart_tx_coverage     # Phase 2 directed coverage sweep
+make MODULE=test_uart_tx_random       # Phase 3 constrained-random regression
+make MODULE=test_uart_tx_random COCOTB_RANDOM_SEED=<seed>   # reproduce a specific run
+make MODULE=test_uart_tx_checker_only # protocol checker in isolation
+cat sim_build/coverage.yml            # Phase 2 coverage report
+cat sim_build/coverage_random.yml     # Phase 3 coverage report
+
+python run_mutants.py           # mutation score: scoreboard-based test_uart_tx.py
+python run_mutants_checker.py   # mutation score: protocol checker alone
 ```

@@ -39,3 +39,17 @@ def byte_class(byte_val):
     if byte_val != 0 and (byte_val & (byte_val - 1)) == 0:
         return "walking_one"
     return "other"
+
+
+def gap_class(idle_cycles):
+    """Classify the idle gap before a transmission into a coverage bin.
+
+    Distinct from byte_class: this is a timing-dimension classification
+    (how long the bus was idle before this frame started), independent of
+    what data the frame carries.
+    """
+    if idle_cycles == 0:
+        return "back_to_back"
+    if idle_cycles <= 2:
+        return "small_gap"
+    return "large_gap"

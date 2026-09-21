@@ -35,7 +35,7 @@ async def test_uart_tx_coverage_sweep(dut):
     """Feature: every (byte-pattern class x framing mode) combination
     transmits correctly. Check: scoreboard, as in test_uart_tx.py. Coverage:
     samples top.tx_data_class_x_mode once per transaction."""
-    driver, scoreboard, monitor = await setup(dut)
+    driver, scoreboard, monitor, checker = await setup(dut)
 
     for byte_val, mode in STIMULUS:
         assert byte_class(byte_val) in (
@@ -50,7 +50,7 @@ async def test_uart_tx_coverage_sweep(dut):
         await driver.send_byte(byte_val, idle_cycles=idle_cycles)
         coverage.sample_transaction(byte_val, mode)
 
-    checked = await finish(driver, scoreboard, monitor)
+    checked = await finish(driver, scoreboard, monitor, checker)
     assert checked == len(STIMULUS), f"expected {len(STIMULUS)} transactions, got {checked}"
     print(f"PASSED: {checked} transactions across all data-class x mode bins")
 
@@ -62,7 +62,7 @@ async def test_uart_tx_reset_mid_frame(dut):
     aborted frame is not scored against any expected byte (the monitor
     marks it aborted), and a normal transmission afterward still works.
     Coverage: samples top.reset_mid_transmission once."""
-    driver, scoreboard, monitor = await setup(dut)
+    driver, scoreboard, monitor, checker = await setup(dut)
 
     # Start a frame directly (bypassing scoreboard.expect -- this frame is
     # deliberately never going to complete) and interrupt it mid-data.
@@ -82,7 +82,7 @@ async def test_uart_tx_reset_mid_frame(dut):
     scoreboard.expect(0x99)
     await driver.send_byte(0x99)
 
-    checked = await finish(driver, scoreboard, monitor)
+    checked = await finish(driver, scoreboard, monitor, checker)
     assert checked == 1, f"expected 1 post-reset transaction checked, got {checked}"
     print("PASSED: DUT recovered from a mid-frame reset and transmitted correctly afterward")
 
@@ -93,9 +93,30 @@ async def test_uart_tx_coverage_report(dut):
     the order they are defined in the file, so this runs last within this
     module and reports/exports the coverage accumulated by the two tests
     above (coverage_db is a process-global singleton that persists across
-    tests in the same simulation run). Fails loudly if a bin was missed."""
+    tests in the same simulation run).
+
+    Asserts closure only on the 4 coverage points/cross this module is
+    actually responsible for driving (tx_data_class, tx_mode, their cross,
+    reset_mid_transmission), not on the global "top" aggregate: since
+    coverage.py also defines idle_gap_class and back_to_back_chain_length
+    (Phase 3, driven by test_uart_tx_random.py instead), and importing
+    uart_env.coverage registers every CoverPoint in this process
+    regardless of which test module samples it, asserting on the global
+    aggregate here would fail for bins this module was never meant to
+    close. See VERIFICATION_PLAN.md.
+    """
     coverage.report(cocotb.log.info)
     coverage.export("sim_build/coverage.yml")
-    pct = coverage.overall_percentage()
-    cocotb.log.info(f"Overall functional coverage: {pct:.1f}%")
-    assert pct == 100.0, f"expected 100% coverage from the directed sweep, got {pct:.1f}%"
+
+    owned = [
+        "top.tx_data_class",
+        "top.tx_mode",
+        "top.tx_data_class_x_mode",
+        "top.reset_mid_transmission",
+    ]
+    for name in owned:
+        pct = coverage.bin_percentage(name)
+        cocotb.log.info(f"{name}: {pct:.1f}%")
+        assert pct == 100.0, f"expected 100% coverage on {name}, got {pct:.1f}%"
+
+    cocotb.log.info(f"Overall functional coverage (this module only): {coverage.overall_percentage():.1f}%")
