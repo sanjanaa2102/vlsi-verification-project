@@ -239,6 +239,135 @@ exist yet when this was fixable without the "would need to regenerate
 every mutant" constraint UART hit; the remaining findings are the same
 kind of documented, deliberate trade-off as UART's.
 
+## Phase 7: Formal Verification
+
+Three properties, chosen because each requires exhaustive reasoning that
+simulation (directed, random, or mutation-tested) does not provide --
+not to collect "formal" as a keyword. Toolchain: `yowasp-yosys` +
+`yowasp-yosys-smtbmc` (Yosys compiled to WebAssembly, pip-installable) +
+`z3-solver` (pip-installable Z3 with a working `z3` CLI) + SymbiYosys
+(`sby`, fetched at a pinned git tag by `regression/formal.py`, since it
+isn't on PyPI) -- all free, no sudo/apt, no billing. Verified this
+actually works end to end (not assumed) before committing to the design:
+a hand-driven `yosys ... sat -verify` attempt, without `sby`, silently
+optimized the assertion cell away -- confirming why `sby`'s carefully
+sequenced passes are used instead of a hand-rolled substitute.
+
+**Not SVA.** All three properties are plain procedural `assert`/`assume`
+statements inside `always @(posedge PCLK)` blocks, verified to parse and
+execute correctly. `property`/`sequence` SVA blocks were never tested and
+are not used or claimed.
+
+### P1 -- PSLVERR correctness
+
+`assert (PSLVERR == (illegal_write || illegal_read))` during ACCESS, for
+every `PADDR`/`PWRITE`/`PSEL`/`PENABLE` combination the solver can choose
+(nothing is `assume`d away). This property is inherently combinational --
+`PSLVERR` depends only on the current-cycle inputs, never on any internal
+register -- so proving it at every BMC step already constitutes a
+complete proof over the entire interface input space (all 256 `PADDR`
+values x both directions), not merely a bounded-in-time claim. **Result:
+PASS (BMC, depth 5; complete by the argument above, since the property
+has no dependence on history).**
+
+### P2 -- an accepted operation is never restarted while busy
+
+The mutant3 (Phase 5) defect class: dropping the busy guard in
+`apb_regblock.v`'s `CTRL` write logic lets a retrigger while busy restart
+the operation. Genuinely temporal, not a same-cycle check: (1) watch for
+`busy_o` rising 0->1 (acceptance); (2) latch the pre-operation `data_o`
+value in the harness's own state; (3) leave every
+`PADDR`/`PWRITE`/`PSEL`/`PENABLE`/`PWDATA` combination completely free
+for as long as busy stays high, so the solver can choose *any* sequence
+of interfering CTRL writes (including further ENABLE/START
+combinations); (4) on `busy_o` falling 1->0 (completion), assert `data_o`
+equals the latched value plus exactly one. `mode prove` (k-induction)
+attempted first. **Result: PASS by successful k-induction -- an unbounded
+proof, true for all time, not just up to a checked depth.**
+
+**Scoping assumption, found necessary by direct testing, not assumed in
+advance:** a DATA-address write while busy is legal at the bus level and
+legitimately changes what value the eventual auto-increment operates on
+(`apb_env/reference_model.py`'s `apply_write` already models this). An
+early version of this property, without excluding it, produced a
+counterexample that was really just this legal, already-understood
+interaction -- not a restart bug. Excluding DATA writes while busy
+(`assume (!(PSEL && PWRITE && PADDR == 8'h08))` when `busy_o`) narrows
+the property to what it is actually about (the CTRL/START retrigger
+guard) instead of silently conflating two unrelated behaviors. CTRL
+writes, including every ENABLE/START combination and illegal accesses,
+remain completely unconstrained throughout.
+
+### P3 -- BUSY is never held for more than OP_LATENCY consecutive cycles
+
+Generalizes the mutant4/mutant5/busy-stuck-style defect classes (each
+mutation testing's *specific hand-injected bug*) into one exhaustive
+claim: no reachable state and no sequence of interfering writes can hold
+`busy_o` longer than the DUT's own configured latency. The bound is not
+an arbitrary constant: the harness takes `OP_LATENCY` as its own
+parameter and passes it straight through to the `apb_regblock` instance,
+so the property's threshold and the DUT's actual latency can never drift
+apart. `mode prove` attempted first. **Result: PASS by successful
+k-induction -- an unbounded proof.**
+
+### A real toolchain limitation found and worked around (not papered over)
+
+Hierarchical cross-module references (`dut.busy_reg`, `dut.data_reg`)
+were the first approach tried for P2/P3's white-box bookkeeping. Direct
+testing found this toolchain does not reliably model them: a *trivial
+tautology*, `assert (busy_o == dut.busy_reg)` -- true by definition, since
+`apb_regblock.v` literally assigns `busy_o = busy_reg` -- produced a false
+counterexample. Confirmed this wasn't a mistake in the property logic by
+replaying the exact same counterexample input sequence through Icarus (a
+simulator this project fully trusts) and observing correct behavior
+throughout, with no assertion violation. **Fix:** `data_o`, a
+verification-only observability port, was added to `apb_regblock.v`
+(mirrors `busy_o`'s existing Phase 5 precedent exactly -- see the RTL
+comment). P2/P3 now observe `busy_o`/`data_o` only, both real ports; the
+same tautology check passes correctly through a port. This is a targeted
+fix for a confirmed tool limitation, not a change to make a property
+pass -- no functional RTL behavior changed, and it required a second
+genuinely necessary fix (`initial assume (!PRESETn)`, since BMC is
+otherwise free to start from a state where reset never occurs at all,
+found the same way: a counterexample trace that literally never resets).
+
+Both fixes, and the DATA-write scoping assumption above, were found by
+instrumenting and replaying actual counterexamples through Icarus or
+inspecting the generated testbench replay -- the same "verify
+empirically, don't assume" discipline used throughout this project, not
+guessed in advance.
+
+### Demonstrated against real faults, not just golden RTL
+
+- P1 against the existing `apb_regblock_mutant8.v` (STATUS write-
+  protection dropped): genuine counterexample, real `trace.vcd` +
+  `trace_tb.v` produced.
+- P2 against `phase5_apb/formal/apb_regblock_fixture_fault_p2p3.v` (a
+  dedicated formal-only fixture reproducing mutant3's exact bug on the
+  `data_o`-equipped RTL -- deliberately *not* one of the 9 tracked
+  mutation-suite mutants, none of which have `data_o`, so mutation
+  testing's existing mutants and results stay completely untouched):
+  both the BMC basecase and the induction step correctly FAIL with a
+  genuine counterexample.
+
+### Coexistence with existing infrastructure
+
+Lives entirely in `phase5_apb/formal/`. Does not modify `apb_env/`, any
+existing test file, `mutation_suite.py`, or `mutation/framework.py`.
+Independent of the simulation scoreboard/protocol/latency checkers --
+no Python code, no cocotb, nothing shared; the only overlap is that both
+happen to check related behaviors from different angles (exhaustive
+formal proof vs. concrete-trace simulation), which is the point, not
+duplication. Not integrated into `mutation_suite.py` as a 4th mechanism
+in this phase -- noted as a natural but explicitly deferred future
+extension, consistent with not redesigning the mutation framework.
+
+Included in the unified regression (`run_regression.py`, its own
+"Formal Verification" report section, `--skip-formal` to omit) and in CI
+(`.github/workflows/regression.yml`) -- see `regression/formal.py`.
+Kept practical: each property proved in about a second against this
+DUT's actual (small) reachable state space.
+
 ## How to run
 
 ```bash
@@ -253,4 +382,7 @@ cat sim_build/coverage_random.yml       # exported coverage report
 verible-verilog-lint apb_regblock.v
 
 python mutation_suite.py                # full mutation report (uses mutation/, DUT-agnostic)
+
+# Formal (from the repo root -- fetches sby automatically on first use):
+python run_regression.py --skip-mutation --skip-lint   # includes formal by default
 ```

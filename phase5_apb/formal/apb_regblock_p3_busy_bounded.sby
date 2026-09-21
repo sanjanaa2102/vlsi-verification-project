@@ -1,0 +1,14 @@
+[options]
+mode prove
+depth 20
+
+[engines]
+smtbmc z3
+
+[script]
+read_verilog -sv apb_regblock.v apb_regblock_p3_busy_bounded.sv
+prep -top apb_regblock_p3_busy_bounded
+
+[files]
+../apb_regblock.v
+apb_regblock_p3_busy_bounded.sv

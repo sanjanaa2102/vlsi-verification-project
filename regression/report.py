@@ -20,17 +20,20 @@ def _git_commit(repo_root):
         return None
 
 
-def build_report(repo_root, test_suites, coverage, mutation, lint, failure_artifacts):
+def build_report(repo_root, test_suites, coverage, mutation, lint, failure_artifacts, formal=None):
     """test_suites: list of suite dicts from runner.run_make_suite (with
     _raw_output already stripped by the caller).
     coverage: {suite_name: {point: pct}}
     mutation: {"uart": {...}, "apb": {...}}
     lint: {"uart": {...}, "apb": {...}}
     failure_artifacts: {suite_name: {"log":..., "waveforms": [...]}}
+    formal: list of regression.formal.run_property() result dicts, or None
     """
+    formal = formal or []
     test_status_ok = all(s["status"] == "PASS" for s in test_suites)
     mutation_status_ok = all(m.get("status") != "ERROR" for m in mutation.values())
-    overall_status = "PASS" if (test_status_ok and mutation_status_ok) else "FAIL"
+    formal_status_ok = all(p["status"] == "PASS" for p in formal)
+    overall_status = "PASS" if (test_status_ok and mutation_status_ok and formal_status_ok) else "FAIL"
 
     return {
         "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -40,6 +43,7 @@ def build_report(repo_root, test_suites, coverage, mutation, lint, failure_artif
         "coverage": coverage,
         "mutation": mutation,
         "lint": lint,
+        "formal": formal,
         "failure_artifacts": failure_artifacts,
     }
 
@@ -92,6 +96,19 @@ def render_markdown(report):
                     lines.append(f"  - waveform: `{w}`")
         lines.append("")
 
+    failed_formal = [p for p in report["formal"] if p["status"] != "PASS"]
+    if failed_formal:
+        lines.append("### Failed formal property detail")
+        lines.append("")
+        for p in failed_formal:
+            lines.append(f"- **{p['name']}**: {p['status']}")
+            if p["name"] in report["failure_artifacts"]:
+                art = report["failure_artifacts"][p["name"]]
+                lines.append(f"  - sby log: `{art['log']}`")
+                for a in art["artifacts"]:
+                    lines.append(f"  - counterexample artifact: `{a}`")
+        lines.append("")
+
     lines.append("## Functional Coverage")
     lines.append("")
     for suite_name, points in report["coverage"].items():
@@ -134,6 +151,25 @@ def render_markdown(report):
             row += [m["detection"].get(mech, {}).get("verdict", "n/a") for mech in mechanism_names]
             row += [m["overall_verdict"]]
             lines.append("| " + " | ".join(row) + " |")
+        lines.append("")
+
+    lines.append("## Formal Verification (phase5_apb)")
+    lines.append("")
+    if report["formal"]:
+        lines.append("| Property | Status | Proof type |")
+        lines.append("|---|---|---|")
+        for p in report["formal"]:
+            proof_type = p["proof_type"] or "n/a"
+            lines.append(f"| {p['name']} | {p['status']} | {proof_type} |")
+        lines.append("")
+        lines.append(
+            "\"unbounded (k-induction)\" means proven true for all time, not just up to a "
+            "bounded depth; \"bounded (BMC)\" means proven true up to the checked depth only "
+            "-- see phase5_apb/VERIFICATION_PLAN.md for which properties achieved which, and why."
+        )
+        lines.append("")
+    else:
+        lines.append("(skipped)")
         lines.append("")
 
     lines.append("## Lint")

@@ -17,8 +17,16 @@
 # Regenerate by installing requirements.txt in a fresh venv, running the
 # full regression successfully, then re-deriving this file the same way
 # (pip freeze, then keep only what `pip show <direct dep>` traces back to
-# for cocotb, cocotb-coverage, and verible -- see Phase 6 commit message
-# for the exact review that produced this list).
+# for cocotb, cocotb-coverage, verible, yowasp-yosys, and z3-solver -- see
+# the Phase 6/7 commit messages for the exact review that produced this.
+#
+# Phase 7 additions (formal verification): yowasp-yosys and
+# yowasp-yosys-smtbmc (Yosys compiled to WebAssembly, pip-installable,
+# no sudo/apt needed) and z3-solver (pip-installable Z3 with a working
+# `z3` CLI binary) -- the SMT-based BMC/k-induction toolchain
+# phase5_apb/formal/ uses via SymbiYosys (sby itself is not on PyPI;
+# fetched separately at a pinned git tag by regression/formal.py into
+# formal_tools/, not committed -- see that module's docstring).
 
 cocotb==2.1.0
 find_libpython==0.5.1
@@ -33,3 +41,11 @@ python-constraint==1.4.0
 PyYAML==6.0.3
 
 verible==0.0.4071.0
+
+yowasp-yosys==0.69.0.0.post1233
+click==8.5.0
+yowasp-runtime==1.96
+platformdirs==4.11.11
+wasmtime==47.0.1
+
+z3-solver==5.1.0.0

@@ -5,3 +5,5 @@ google-genai==2.24.0
 verible==0.0.4071.0
 cocotb-coverage==2.0
 PyYAML==6.0.3
+yowasp-yosys==0.69.0.0.post1233
+z3-solver==5.1.0.0

@@ -7,6 +7,7 @@ and mutation effectiveness.
     python run_regression.py --seed 12345       # pin both random suites
     python run_regression.py --skip-mutation     # faster local iteration
     python run_regression.py --skip-lint
+    python run_regression.py --skip-formal
 
 phase2_llm/ is intentionally out of scope -- it is a separate research
 track, not part of the UART + APB verification project this orchestrates.
@@ -16,6 +17,7 @@ import argparse
 import os
 import sys
 
+from regression import formal as formal_mod
 from regression import report as report_mod
 from regression import runner
 
@@ -28,6 +30,7 @@ def main():
     parser.add_argument("--seed", type=int, default=None, help="Pin both random suites to this seed (default: fresh random seed each run, recorded in the report)")
     parser.add_argument("--skip-mutation", action="store_true", help="Skip mutation testing (fast local iteration; the full regression must still be run before relying on results)")
     parser.add_argument("--skip-lint", action="store_true", help="Skip lint")
+    parser.add_argument("--skip-formal", action="store_true", help="Skip formal property proofs (phase5_apb)")
     args = parser.parse_args()
 
     uart_seed = args.seed if args.seed is not None else runner.generate_seed()
@@ -104,13 +107,26 @@ def main():
         mutation["apb"] = runner.run_mutation(runner.APB_DIR)
         print(f"    {mutation['apb'].get('status')}")
 
-    # Strip raw simulator output before persisting the report -- it's
+    formal_results = []
+    if not args.skip_formal:
+        print("==> apb_formal (3 properties: PSLVERR correctness, no-restart-while-busy, busy-bounded)")
+        formal_results = formal_mod.run_all()
+        for p in formal_results:
+            print(f"    {p['name']}: {p['status']} ({p['proof_type'] or 'n/a'})")
+            if p["status"] != "PASS":
+                print(f"    ==> capturing failure artifacts for {p['name']}")
+                failure_artifacts[p["name"]] = formal_mod.capture_failure_artifacts(p, RESULTS_DIR)
+
+    # Strip raw simulator/sby output before persisting the report -- it's
     # already saved separately for failing suites (capture_failure_artifacts)
     # and would otherwise bloat the JSON report for every passing suite too.
     for suite in test_suites:
         suite.pop("_raw_output", None)
+    for p in formal_results:
+        p.pop("raw_output", None)
+        p.pop("task_dir", None)
 
-    report = report_mod.build_report(REPO_ROOT, test_suites, coverage, mutation, lint, failure_artifacts)
+    report = report_mod.build_report(REPO_ROOT, test_suites, coverage, mutation, lint, failure_artifacts, formal=formal_results)
     report_mod.write_json(report, os.path.join(RESULTS_DIR, "report.json"))
     report_mod.write_markdown(report, os.path.join(RESULTS_DIR, "report.md"))
 

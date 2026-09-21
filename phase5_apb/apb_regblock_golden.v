@@ -11,12 +11,28 @@ module apb_regblock #(
     output     [7:0]  PRDATA,
     output            PREADY,
     output            PSLVERR,
-    output            busy_o     // verification-only observability port --
+    output            busy_o,    // verification-only observability port --
                                   // NOT part of the APB interface, mirrors
                                   // the internal busy_reg so the testbench
                                   // can independently verify OP_LATENCY
                                   // cycle-accurately without relying on
                                   // software polling. See VERIFICATION_PLAN.md.
+    output     [7:0]  data_o     // verification-only observability port,
+                                  // added in Phase 7, same rationale as
+                                  // busy_o: mirrors data_reg so formal
+                                  // properties can reference it through a
+                                  // real port. Confirmed by direct testing
+                                  // (a trivial tautology on a hierarchical
+                                  // dut.busy_reg reference produced a false
+                                  // counterexample) that this toolchain's
+                                  // formal flow does not reliably model
+                                  // hierarchical cross-module references,
+                                  // even to signals that are otherwise
+                                  // correct -- exposed ports do not have
+                                  // this problem. Not part of the APB
+                                  // interface; no existing test references
+                                  // it. See phase5_apb/formal/ and
+                                  // VERIFICATION_PLAN.md.
 );
     localparam ADDR_CTRL   = 8'h00;
     localparam ADDR_STATUS = 8'h04;
@@ -45,6 +61,7 @@ module apb_regblock #(
     assign PREADY  = 1'b1;              // zero-wait-state slave
     assign PSLVERR = illegal_write || illegal_read;
     assign busy_o  = busy_reg;
+    assign data_o  = data_reg;
 
     reg [7:0] prdata_reg;
     assign PRDATA = prdata_reg;

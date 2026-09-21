@@ -31,10 +31,13 @@ generates and evaluates testbenches against the UART mutation suite.
   "Mutation testing framework" below).
 - `regression/` + `run_regression.py` — a unified, reproducible regression
   runner covering both DUTs end to end (directed, coverage, constrained-
-  random, isolation, lint, mutation), with machine- and human-readable
-  reports. See "Unified regression" below.
+  random, isolation, lint, mutation, formal), with machine- and
+  human-readable reports. See "Unified regression" below.
+- `phase5_apb/formal/` — three formally-proven properties (two of them
+  genuine unbounded proofs, not bounded checks) complementing the
+  simulation-based verification above. See "Formal verification" below.
 
-Formal checks and UART RX are planned for later phases.
+UART RX is planned for a later phase.
 
 ## Unified regression (one command, complete evidence)
 
@@ -42,16 +45,19 @@ Formal checks and UART RX are planned for later phases.
 python run_regression.py                 # full regression, fresh random seeds each run
 python run_regression.py --seed 12345     # pin both random suites (debugging/reproduction)
 python run_regression.py --skip-mutation  # faster local iteration (mutation testing is the slow part)
+python run_regression.py --skip-formal
 ```
 
 Runs, in order: `test0` toolchain sanity, UART directed/coverage-
 directed/random/checker-only, APB directed/random/checker-only/latency-
-only, lint on both RTL files, and the full mutation suite for both DUTs
-(`mutation/`, unchanged) -- then writes `regression_results/report.json`
+only, lint on both RTL files, the full mutation suite for both DUTs
+(`mutation/`, unchanged), and the 3 formal property proofs
+(`phase5_apb/formal/`) -- then writes `regression_results/report.json`
 (machine-readable) and `regression_results/report.md` (human-readable).
 Neither report collapses to a single percentage: tests, coverage (per
 CoverPoint), mutation (per mechanism, per defect category, and per
-mutant), and lint (per finding) are all reported as their own sections.
+mutant), formal (per property, with proof type), and lint (per finding)
+are all reported as their own sections.
 
 **Reproducibility:** each random suite's seed is generated *before* the
 suite runs (so it's recorded even on a hang or early failure), passed
@@ -69,14 +75,19 @@ to `regression_results/failures/<suite>/simulator_output.log`, and (for
 single-`make` suites) that suite is automatically re-run with `WAVES=1`
 (same seed, if applicable) to capture a waveform into the same directory
 -- nothing extra is generated for suites that pass, so this stays small.
+A failing formal property similarly gets its real SymbiYosys counterexample
+(`.vcd` + Verilog testbench replay + Yosys witness file) copied into
+`regression_results/failures/<property>/` -- demonstrated against a real
+fault, not just implemented and assumed to work (see "Formal verification"
+below).
 
 **Pass/fail semantics:** the overall regression fails if any test
-fails, any suite errors or times out, or mutation testing produces an
-`UNKNOWN` verdict (a tool-level problem). A mutant that legitimately
-`SURVIVED` a mechanism never designed to catch it (e.g. `protocol_checker`
-vs. a pure data-value bug -- extensively documented in both
-`VERIFICATION_PLAN.md`s) does *not* fail the build; it's reported
-honestly, not hidden and not treated as a regression.
+fails, any suite errors or times out, mutation testing produces an
+`UNKNOWN` verdict (a tool-level problem), or a formal property fails.
+A mutant that legitimately `SURVIVED` a mechanism never designed to catch
+it (e.g. `protocol_checker` vs. a pure data-value bug -- extensively
+documented in both `VERIFICATION_PLAN.md`s) does *not* fail the build;
+it's reported honestly, not hidden and not treated as a regression.
 
 ## CI
 
@@ -88,7 +99,10 @@ Verilog via `apt-get` (free, in Ubuntu's default repos) and every Python
 dependency -- including `verible-verilog-lint`, via the same
 `pip install verible` mechanism used locally, pinned to the exact version
 this project's lint results were produced with, since Verible isn't in
-Ubuntu's apt repos at all -- from `requirements-lock.txt`. The full
+Ubuntu's apt repos at all -- from `requirements-lock.txt`. Since Phase 7,
+the same `requirements-lock.txt` step also installs the formal-verification
+toolchain (`yowasp-yosys`, `z3-solver`); SymbiYosys itself (`sby`, not on
+PyPI) is fetched automatically at a pinned git tag on first use. The full
 report and any failure artifacts are uploaded as a workflow artifact on
 every run, pass or fail.
 
@@ -101,6 +115,10 @@ every run, pass or fail.
 - [Icarus Verilog](http://iverilog.icarus.com/) (`iverilog`, `vvp`) for simulation
 - [GTKWave](https://gtkwave.sourceforge.net/) (system package, e.g. `apt install gtkwave`) for waveform viewing
 - [Verible](https://github.com/chipsalliance/verible) (`pip install verible`, included in `requirements.txt`) for lint
+- `yowasp-yosys` + `z3-solver` (both pip-installable, included in
+  `requirements.txt`) and SymbiYosys (`sby`, auto-fetched by
+  `regression/formal.py` on first use, no separate install step) for
+  formal verification -- see "Formal verification" below
 
 ## Running the tests
 
@@ -219,6 +237,45 @@ write's own side effect was masking the very condition it was meant to
 test), not a mechanism weakness -- and by adding one mutant specifically
 because the first 8 never exercised the protocol checker's actual job.
 Full investigation writeup in `phase5_apb/VERIFICATION_PLAN.md`.
+
+## Formal verification (phase5_apb)
+
+Three properties, on `apb_regblock` only, chosen because each needs
+exhaustive reasoning simulation doesn't exhaustively provide -- not to
+add "formal" as a keyword. Toolchain (all free, no sudo/apt, no billing):
+`yowasp-yosys` + `yowasp-yosys-smtbmc` (Yosys compiled to WebAssembly,
+pip-installable) + `z3-solver` (pip-installable Z3) driven by real
+SymbiYosys (`sby`) -- verified directly that hand-driving Yosys without
+`sby` is fragile (a naive attempt silently optimized the checked
+assertion away) before committing to this design. **Not SVA:** every
+property is a plain procedural `assert`/`assume` in an
+`always @(posedge PCLK)` block, verified to parse and execute; `property`/
+`sequence` SVA blocks were never tested or used.
+
+| Property | What it proves | Result |
+|---|---|---|
+| P1: PSLVERR correctness | `PSLVERR` asserted iff the access is illegal, for all 256 `PADDR` values x both directions | PASS -- complete by construction (purely combinational, no dependence on history) |
+| P2: no restart while busy | An accepted operation increments `DATA` exactly once, regardless of any interfering CTRL writes while busy (the Phase 5 mutant3 defect class) | **PASS by k-induction -- unbounded, true for all time** |
+| P3: BUSY bounded by `OP_LATENCY` | `busy_o` never stays asserted longer than the DUT's own configured latency (generalizes the mutant4/5 defect class into one exhaustive claim) | **PASS by k-induction -- unbounded, true for all time** |
+
+Both P2 and P3 first attempt k-induction and only fall back to a
+clearly-labeled bounded result if induction doesn't converge (neither
+needed to). Demonstrated against real faults, not just golden RTL: P1
+against the existing `apb_regblock_mutant8.v` and P2 against a dedicated
+formal-only fixture reproducing mutant3's exact bug -- both produce
+genuine counterexamples with real `.vcd`/testbench-replay artifacts.
+`data_o`, a verification-only observability port mirroring `busy_o`'s
+existing precedent, was added to `apb_regblock.v` after direct testing
+showed this toolchain does not reliably model hierarchical cross-module
+signal references (confirmed with a trivial tautology that produced a
+false counterexample) -- exposed ports don't have that problem. Full
+writeup, including two other real modeling issues found and fixed by
+replaying counterexamples through Icarus, in
+`phase5_apb/VERIFICATION_PLAN.md`.
+
+```bash
+python run_regression.py --skip-mutation --skip-lint   # formal runs by default
+```
 
 ## Mutation testing framework
 

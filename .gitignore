@@ -7,3 +7,7 @@ results.xml
 *.vcd
 *.fst
 regression_results/
+formal_tools/
+phase5_apb/formal/apb_regblock_p1_pslverr/
+phase5_apb/formal/apb_regblock_p2_no_restart/
+phase5_apb/formal/apb_regblock_p3_busy_bounded/

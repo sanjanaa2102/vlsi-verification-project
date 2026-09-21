@@ -29,7 +29,9 @@ jobs:
       # gets installed (via the `verible` PyPI package, prebuilt binaries
       # pinned to the exact version this project's lint results were
       # produced with) rather than through Ubuntu's apt repos, which
-      # don't package it at all.
+      # don't package it at all. Since Phase 7, this also installs the
+      # formal-verification toolchain (yowasp-yosys, yowasp-yosys-smtbmc,
+      # z3-solver) the same way -- no separate apt step needed for it.
       - name: Install Python dependencies
         run: pip install -r requirements-lock.txt
 
@@ -38,6 +40,20 @@ jobs:
           iverilog -V
           verible-verilog-lint --version
           python -c "import cocotb; print('cocotb', cocotb.__version__)"
+          yowasp-yosys --version
+          z3 --version
+
+      # SymbiYosys (sby) itself is not on PyPI (it's a small pure-Python
+      # tool with no setup.py to pip-install from git either); rather
+      # than vendor it into this repo, run_regression.py fetches it
+      # automatically on first use (regression/formal.py's ensure_sby(),
+      # a pinned-tag git clone into the gitignored formal_tools/) -- this
+      # step just runs it once up front so that fetch (needing network
+      # access to github.com, same as any other CI dependency install
+      # step) happens with clear, separate log output rather than
+      # silently inside the first formal property's run.
+      - name: Fetch SymbiYosys (sby)
+        run: python -c "from regression import formal; formal.ensure_sby()"
 
       - name: Run complete regression
         run: python run_regression.py

@@ -104,7 +104,7 @@ module apb_regblock #(
                 case (PADDR)
                     ADDR_CTRL: begin
                         enable_reg <= PWDATA[0];
-                        if (PWDATA[1] && enable_reg && !busy_reg) begin
+                        if (PWDATA[1] && enable_reg) begin
                             busy_reg <= 1'b1;
                             op_count <= 8'h00;
                         end

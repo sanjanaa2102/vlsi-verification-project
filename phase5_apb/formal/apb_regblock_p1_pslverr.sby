@@ -1,0 +1,14 @@
+[options]
+mode bmc
+depth 5
+
+[engines]
+smtbmc z3
+
+[script]
+read_verilog -sv apb_regblock.v apb_regblock_p1_pslverr.sv
+prep -top apb_regblock_p1_pslverr
+
+[files]
+../apb_regblock.v
+apb_regblock_p1_pslverr.sv
