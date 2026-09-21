@@ -27,9 +27,52 @@ architecture, formal checks, and CI) is added.
 
 - Python 3.12, packages in `requirements.txt`
 - [Icarus Verilog](http://iverilog.icarus.com/) (`iverilog`, `vvp`) for simulation
+- [GTKWave](https://gtkwave.sourceforge.net/) (system package, e.g. `apt install gtkwave`) for waveform viewing
+- [Verible](https://github.com/chipsalliance/verible) (`pip install verible`, included in `requirements.txt`) for lint
 
 ## Running the tests
 
 ```bash
 cd phase1_uart && make
 ```
+
+## Waveform debugging
+
+cocotb's Icarus Verilog Makefile flow supports waveform dumping out of the
+box via the `WAVES=1` variable — no Makefile changes are required:
+
+```bash
+cd phase1_uart
+make clean
+make WAVES=1
+gtkwave sim_build/uart_tx.fst
+```
+
+This dumps an FST file (GTKWave's native format, smaller and faster than
+VCD) covering the full `uart_tx` hierarchy — all ports (`clk`, `rst`,
+`tx_start`, `tx_data`, `tx_serial`, `tx_busy`) plus internal FSM state and
+parameters. In GTKWave, drag signals from the SST panel on the left into
+the signal list to view them.
+
+To convert the FST to VCD (e.g. for tools that don't read FST), use the
+`fst2vcd` utility that ships with GTKWave:
+
+```bash
+fst2vcd sim_build/uart_tx.fst -o sim_build/uart_tx.vcd
+```
+
+## Lint
+
+[Verible](https://github.com/chipsalliance/verible)'s `verible-verilog-lint`
+checks the RTL for style and structural issues (missing default cases in
+`case` statements, undertyped parameters, POSIX file-ending violations,
+etc.):
+
+```bash
+cd phase1_uart
+verible-verilog-lint uart_tx.v
+```
+
+Lint findings are currently reported, not auto-fixed — see the project's
+progress notes / commit history for current known findings and the plan to
+address them.

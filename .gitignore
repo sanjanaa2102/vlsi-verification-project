@@ -5,3 +5,4 @@ sim_build/
 results.xml
 *.vvp
 *.vcd
+*.fst
