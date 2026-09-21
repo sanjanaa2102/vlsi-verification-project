@@ -51,13 +51,24 @@ class MutantResult:
 
 
 def _run_make(dut_dir, verilog_source_abspath, mechanism, timeout):
-    subprocess.run(["make", "clean"], cwd=dut_dir, capture_output=True)
+    # These Makefiles reference $(PWD), which GNU Make resolves from the
+    # *inherited* PWD environment variable (when not otherwise defined in
+    # the Makefile), not from subprocess.run's cwd=. This was previously
+    # masked in every prior use of this engine because it was always
+    # invoked from a shell already cd'd into dut_dir, so the inherited
+    # PWD happened to already match. Found by Phase 6's orchestrator
+    # invoking this engine from the repo root instead, which surfaced it
+    # as a real (if previously latent) robustness gap -- fixed here so
+    # the engine works correctly regardless of the caller's own PWD.
+    env = dict(os.environ, PWD=dut_dir)
+    subprocess.run(["make", "clean"], cwd=dut_dir, capture_output=True, env=env)
     result = subprocess.run(
         ["make", f"VERILOG_SOURCES={verilog_source_abspath}", f"MODULE={mechanism.make_module}"],
         cwd=dut_dir,
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
     output = result.stdout + result.stderr
     m = re.search(r"FAIL=(\d+)", output)
@@ -87,6 +98,7 @@ def run_suite(dut_dir, mutants, mechanisms, timeout=120, restore_golden=True):
             verdict, fail_count = _run_make(dut_dir, abspath, mechanism, timeout)
             results.append(MutantResult(mutant, mechanism, verdict, fail_count))
     if restore_golden:
-        subprocess.run(["make", "clean"], cwd=dut_dir, capture_output=True)
-        subprocess.run(["make"], cwd=dut_dir, capture_output=True)
+        env = dict(os.environ, PWD=dut_dir)
+        subprocess.run(["make", "clean"], cwd=dut_dir, capture_output=True, env=env)
+        subprocess.run(["make"], cwd=dut_dir, capture_output=True, env=env)
     return results

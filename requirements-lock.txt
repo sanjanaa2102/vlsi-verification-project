@@ -1,0 +1,35 @@
+# Full, exact dependency closure for the UART + APB regression
+# environment (what `python run_regression.py` and CI actually need),
+# generated from a working venv and then reviewed/pruned by hand -- not
+# a blind `pip freeze`.
+#
+# Deliberately narrower than requirements.txt: requirements.txt is this
+# project's full direct-dependency list, including packages only used by
+# phase2_llm (google-genai, for the LLM test-generation script) and
+# pyuvm (a declared-but-currently-unused dependency, confirmed by
+# grepping for `import pyuvm` across every active test/env file --
+# reserved for a possible future phase, not removed from requirements.txt
+# since that's outside Phase 6's scope). Neither phase2_llm nor pyuvm are
+# exercised by the regression this lock file is for, so google-genai's
+# entire transitive closure (google-auth, httpx, cryptography, pydantic,
+# ~15 more) and pyuvm are intentionally excluded here.
+#
+# Regenerate by installing requirements.txt in a fresh venv, running the
+# full regression successfully, then re-deriving this file the same way
+# (pip freeze, then keep only what `pip show <direct dep>` traces back to
+# for cocotb, cocotb-coverage, and verible -- see Phase 6 commit message
+# for the exact review that produced this list).
+
+cocotb==2.1.0
+find_libpython==0.5.1
+pytest==9.1.1
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+
+cocotb-coverage==2.0
+python-constraint==1.4.0
+PyYAML==6.0.3
+
+verible==0.0.4071.0

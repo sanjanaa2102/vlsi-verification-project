@@ -29,12 +29,75 @@ generates and evaluates testbenches against the UART mutation suite.
 - `mutation/` — the generalized, DUT-agnostic mutation-testing engine
   both `phase1_uart/` and `phase5_apb/` build their manifests on (see
   "Mutation testing framework" below).
+- `regression/` + `run_regression.py` — a unified, reproducible regression
+  runner covering both DUTs end to end (directed, coverage, constrained-
+  random, isolation, lint, mutation), with machine- and human-readable
+  reports. See "Unified regression" below.
 
-Formal checks, UART RX, and CI are planned for later phases.
+Formal checks and UART RX are planned for later phases.
+
+## Unified regression (one command, complete evidence)
+
+```bash
+python run_regression.py                 # full regression, fresh random seeds each run
+python run_regression.py --seed 12345     # pin both random suites (debugging/reproduction)
+python run_regression.py --skip-mutation  # faster local iteration (mutation testing is the slow part)
+```
+
+Runs, in order: `test0` toolchain sanity, UART directed/coverage-
+directed/random/checker-only, APB directed/random/checker-only/latency-
+only, lint on both RTL files, and the full mutation suite for both DUTs
+(`mutation/`, unchanged) -- then writes `regression_results/report.json`
+(machine-readable) and `regression_results/report.md` (human-readable).
+Neither report collapses to a single percentage: tests, coverage (per
+CoverPoint), mutation (per mechanism, per defect category, and per
+mutant), and lint (per finding) are all reported as their own sections.
+
+**Reproducibility:** each random suite's seed is generated *before* the
+suite runs (so it's recorded even on a hang or early failure), passed
+through as `COCOTB_RANDOM_SEED=<seed>`, and printed/reported prominently.
+Verified concretely, not assumed: the same seed reproduces the exact same
+randomized stimulus sequence byte-for-byte across independent runs (not
+just the same logged seed number), and a different seed produces a
+genuinely different sequence from the first transaction onward, for both
+UART and APB. Reproduce a specific run with
+`make MODULE=<suite> COCOTB_RANDOM_SEED=<seed>` in the relevant DUT
+directory.
+
+**Failure diagnostics:** a failing suite's full simulator output is saved
+to `regression_results/failures/<suite>/simulator_output.log`, and (for
+single-`make` suites) that suite is automatically re-run with `WAVES=1`
+(same seed, if applicable) to capture a waveform into the same directory
+-- nothing extra is generated for suites that pass, so this stays small.
+
+**Pass/fail semantics:** the overall regression fails if any test
+fails, any suite errors or times out, or mutation testing produces an
+`UNKNOWN` verdict (a tool-level problem). A mutant that legitimately
+`SURVIVED` a mechanism never designed to catch it (e.g. `protocol_checker`
+vs. a pure data-value bug -- extensively documented in both
+`VERIFICATION_PLAN.md`s) does *not* fail the build; it's reported
+honestly, not hidden and not treated as a regression.
+
+## CI
+
+`.github/workflows/regression.yml` runs the same `run_regression.py` on
+every push/PR to `main`, on GitHub's free `ubuntu-latest` runners --
+GitHub Actions is free for public repos and has a generous free tier
+otherwise, with no billing anywhere in this workflow. It installs Icarus
+Verilog via `apt-get` (free, in Ubuntu's default repos) and every Python
+dependency -- including `verible-verilog-lint`, via the same
+`pip install verible` mechanism used locally, pinned to the exact version
+this project's lint results were produced with, since Verible isn't in
+Ubuntu's apt repos at all -- from `requirements-lock.txt`. The full
+report and any failure artifacts are uploaded as a workflow artifact on
+every run, pass or fail.
 
 ## Requirements
 
-- Python 3.12, packages in `requirements.txt`
+- Python 3.12, packages in `requirements.txt` (or `requirements-lock.txt`
+  for the exact pinned closure used by CI and to reproduce the regression
+  environment precisely -- see that file's header for what it covers and
+  why it's narrower than `requirements.txt`)
 - [Icarus Verilog](http://iverilog.icarus.com/) (`iverilog`, `vvp`) for simulation
 - [GTKWave](https://gtkwave.sourceforge.net/) (system package, e.g. `apt install gtkwave`) for waveform viewing
 - [Verible](https://github.com/chipsalliance/verible) (`pip install verible`, included in `requirements.txt`) for lint

@@ -1,0 +1,52 @@
+name: Regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Icarus Verilog is free/open-source and available in Ubuntu's
+      # default apt repos -- the simulator itself, unlike the lint tool
+      # below, doesn't need a specific pinned version for this project.
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      # requirements-lock.txt pins the exact, tested versions of every
+      # direct AND transitive dependency (see the file's own header for
+      # how/why it was generated) -- this is also how verible-verilog-lint
+      # gets installed (via the `verible` PyPI package, prebuilt binaries
+      # pinned to the exact version this project's lint results were
+      # produced with) rather than through Ubuntu's apt repos, which
+      # don't package it at all.
+      - name: Install Python dependencies
+        run: pip install -r requirements-lock.txt
+
+      - name: Verify toolchain
+        run: |
+          iverilog -V
+          verible-verilog-lint --version
+          python -c "import cocotb; print('cocotb', cocotb.__version__)"
+
+      - name: Run complete regression
+        run: python run_regression.py
+
+      - name: Upload regression report and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-results
+          path: regression_results/
+          if-no-files-found: warn
+          retention-days: 14
