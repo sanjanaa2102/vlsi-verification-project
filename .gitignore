@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+sim_build/
+results.xml
+*.vvp
+*.vcd
