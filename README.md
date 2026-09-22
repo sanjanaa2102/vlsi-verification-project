@@ -290,11 +290,10 @@ uploads the report and any failure artifacts.
 **Status of remote CI verification:** the exact commands this workflow
 runs (`pip install -r requirements-lock.txt`, `python run_regression.py`,
 etc.) have been verified locally, including from a byte-fresh virtual
-environment using only `requirements-lock.txt`. The workflow YAML has
-been validated for syntax and structure. This repository is not
-currently connected to a GitHub remote with an executed Actions run, so
-a real remote CI execution has not been observed -- that verification is
-pending, not claimed.
+environment using only `requirements-lock.txt`. It has also now been
+observed running for real on GitHub's `ubuntu-latest` runners against
+this repository (triggered by the initial push to `main`), completing
+green end to end -- see the Actions tab for the run history.
 
 ## `phase2_llm/`: LLM-assisted verification (separate track)
 
